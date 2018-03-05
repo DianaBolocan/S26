@@ -5,36 +5,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-int notIn(char* word,char trigrams[20][3]){
+int notIn(char* word,char** trigrams){
   for(int i=0;i<20;i++)
 	if(strcmp(word,trigrams[i]) == 0)
 		return 0;
   return 1;
 }
 
-void getBestFit(char** trigrams,int* freq,int frecv,char* word){
-  int position = 19;
-  //find best place
-  while(freq[position] < frecv && position > 0){
-	printf("for %s, %d < %d\n",word,freq[position],frecv);
-	position--;
-  }
-
-  //shift the other freqs and trigrams
-  for(int index = 19;index > position;index--){
-	freq[index] = freq[index-1];
-	memset(trigrams[index],0,3);
-	strcpy(trigrams[index],trigrams[index-1]);
-  }
-  
-  //place the new trigrams
-  freq[position] = frecv;
-  memset(trigrams[position],0,3);
-  strcpy(trigrams[position],word);
-  printf("on %d got %s with %d:\n",position,trigrams[position],freq[position]);
-}
-
-void setTrigramsFrequency(char* word,char** trigrams,int position,int* freq,FILE* text,int size){
+void setTrigramsFrequency(char* word,char** trigrams,int position,int** freq,FILE* text,int size){
   int wordFreq = 0;
   
   //check number or appearances in text
@@ -54,15 +32,41 @@ void setTrigramsFrequency(char* word,char** trigrams,int position,int* freq,FILE
 	  }
 
 	//if freq is higher then rewrite the trigrams and freqs
-	if(wordFreq > freq[19]){
-		getBestFit(trigrams,freq,wordFreq,word);
+	if(wordFreq > (*freq)[19]){
+		int position = 19;
+  //find best place
+  while((*freq)[position] < wordFreq && position > 0){
+	position--;
+  }
+  //shift the other freqs and trigrams
+  for(int index = 19;index > position+1;index--){
+	(*freq)[index] = (*freq)[index-1];
+	free(trigrams[index]);
+	trigrams[index] = (char*)malloc(4*sizeof(char));
+	strcpy(trigrams[index],trigrams[index-1]);
+  }
+  
+  //place the new trigrams
+  (*freq)[position+1] = wordFreq;
+  free(trigrams[position+1]);
+  trigrams[position+1] = (char*)malloc(4*sizeof(char));
+  strcpy(trigrams[position+1],word);
 	}
   }
 }
 
-void rewriteKey(char key[26],char** trigrams,int* freq){
-  char usualTri[20][3] ={ "the", "and", "ing", "her", "hat", "his", "tha", "ere", "for", "ent", "ion", "ter", "was", "you", "ith", "ver", "all", "wit", "thi", "tio"};
-  
+void rewriteKey(char key[26],char** trigrams,int** freq){
+  char usualTri[3][3] ={ "THE", "AND", "ING"};
+  int changed[26] = {0};
+  int index = 0 ;
+  for(int index = 0 ;index < 3; index++){
+	//if(index == 0 || index == 1 || index == 8)
+	for(int letter=0;letter<3;letter++)
+		if(changed[usualTri[index][letter] - 65] == 0 ){
+			key[trigrams[index+1][letter] - 65] = usualTri[index][letter];
+			changed[usualTri[index][letter] - 65] = 1;
+		}
+  }
 }
 
 int getPosition(int frequencyText[26]){
@@ -90,7 +94,8 @@ void getKey(int frequencyText[26], char statistics[26], char key[26]){
 int main(){
   struct stat textStatus;
   char frequency[26] = "ETAOINSHRDLCUMWFGYPBVKJXQZ";
-  char key[26] = "";
+  char* key;
+  key = (char*)malloc(26*sizeof(char));
   FILE *encryptedText = fopen("S26_encryptedText","r");
   if(encryptedText == NULL){
  	printf("fopen() encrypted text error.\n");
@@ -115,40 +120,43 @@ int main(){
   }
 
   getKey(frequencyText,frequency,key);
-  fseek(encryptedText,0,SEEK_SET);
-  ch = fgetc(encryptedText);
-  while(ch != EOF){
-	fputc(key[ch - 65],decryptedText);
-	ch = fgetc(encryptedText);
-  }
 
   for(int i=0;i<26;i++){
 	printf("%c",key[i]);
   }
   printf("\n");  
 
-  char trigram[20][3];
-  for(int i=0;i<19;i++)
-	memset(trigram[i],0,3);
-  int freq[20] = { 0 };
+  char** trigram = (char**)malloc(20*sizeof(char*));
+  for(int index = 0 ;index < 20; index++)
+	trigram[index] = (char*)malloc(4*(sizeof(char)));
+  int* freq = (int*)malloc(20*sizeof(int));
+  for(int index=0;index<20;index++)
+	freq[index] = 0;
   int position = 0;
   fseek(encryptedText,position,SEEK_SET);
-  while(position < 50){
+  while(position < 1000){
+	printf("%d out of 1000\n",position+1);
 	char* word;
 	word = (char*)malloc(4);
 	if(fgets(word,4,encryptedText) == NULL){
 		printf("fgets() error.\n");
 		return 0;
 	}
-	setTrigramsFrequency(word,trigram,position,freq,encryptedText,(int)textStatus.st_size);
+	setTrigramsFrequency(word,trigram,position,&freq,encryptedText,(int)textStatus.st_size);
 	position++;
 	fseek(encryptedText,position,SEEK_SET);
   }
-  for(int i =0;i<20;i++)
-	printf("%s ",trigram[i]);
+  rewriteKey(key,trigram,&freq);
+  for(int i=0;i<26;i++){
+	printf("%c",key[i]);
+  }
   printf("\n");
-  rewriteKey(key,trigram,freq);
-
+  fseek(encryptedText,0,SEEK_SET);
+  ch = fgetc(encryptedText);
+  while(ch != EOF){
+	fputc(key[ch - 65],decryptedText);
+	ch = fgetc(encryptedText);
+  }
   printf("\nSuccesfuly decrypted the text.\n");
   return 0;
 }
